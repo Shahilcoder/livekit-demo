@@ -57,8 +57,9 @@ const LiveKitConnect: React.FC = () => {
   const [isJoined, setIsJoined] = useState<boolean>(false);
   const [room, setRoom] = useState<Room | null>(null);
   const [remoteParticipantsTracks, setRemoteParticipantsTracks] = useState<Map<string, Map<string, RemoteTrack>>>(new Map());
-  const [roomName, setRoomName] = useState<string>("");
-  const [participantName, setParticipantName] = useState<string>("");
+  const [roomName, setRoomName] = useState<string>("test1");
+  const [participantName, setParticipantName] = useState<string>("A");
+  const [isMuted, setIsMuted] = useState<boolean>(false);
 
 
   function handleTrackSubscribed(
@@ -173,7 +174,7 @@ const LiveKitConnect: React.FC = () => {
           <button
             onClick={setupRoom}
             type="button"
-            className="w-full inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-white font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-white font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
           >
             Join room
           </button>
@@ -210,6 +211,37 @@ const LiveKitConnect: React.FC = () => {
       </div>
 
       <div className="flex gap-4 mt-4 px-6 pb-6">
+        <button
+          type='button'
+          className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600' : 'bg-gray-600'} text-white font-medium hover:${isMuted ? 'bg-red-700' : 'bg-gray-700'} cursor-pointer`}
+          onClick={() => {
+            if (room) {
+              const localAudioPubs = Array.from(room.localParticipant.audioTrackPublications.values());
+              localAudioPubs.forEach(pub => {
+                if (pub.audioTrack?.isMuted)
+                  pub.audioTrack?.mute();
+                else
+                  pub.audioTrack?.unmute();
+              })
+            }
+
+            setIsMuted((prev: boolean) => !prev);
+          }}
+        >
+          {isMuted ? (
+            // Muted mic icon (slash)
+            <svg xmlns="http://www.w3.org/2000/svg" className="inline w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path d="M9 5a3 3 0 016 0v4a3 3 0 01-6 0V5z" stroke="currentColor" strokeWidth="2" />
+              <path d="M19 11v1a7 7 0 01-7 7 7 7 0 01-7-7v-1m13.5 6.5L4.5 5.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          ) : (
+            // Unmuted mic icon
+            <svg xmlns="http://www.w3.org/2000/svg" className="inline w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path d="M12 19a7 7 0 007-7v-1M5 11v1a7 7 0 007 7" stroke="currentColor" strokeWidth="2" />
+              <rect x="9" y="5" width="6" height="8" rx="3" stroke="currentColor" strokeWidth="2" />
+            </svg>
+          )}
+        </button>
         <button
           type='button'
           className="px-4 py-2 rounded bg-red-600 text-white font-medium hover:bg-red-700 cursor-pointer"

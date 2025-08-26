@@ -7,5 +7,11 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss()
-  ]
+  ],
+  server: {
+    https: {
+      key: './cert.key',
+      cert: './cert.crt'
+    }
+  }
 })
