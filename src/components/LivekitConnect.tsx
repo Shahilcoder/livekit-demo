@@ -1,9 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  createLocalTracks,
-  LocalTrack,
   LocalTrackPublication,
-  Participant,
   RemoteParticipant,
   RemoteTrack,
   RemoteTrackPublication,
@@ -13,32 +10,16 @@ import {
   VideoPresets,
 } from 'livekit-client';
 import { getToken } from '../services/livekit.service';
-import { flushSync } from 'react-dom';
-import Video from './Video';
+import ParticipantWindow from './ParticipantWindow';
 
 const url: string = "wss://dev.netclan.com/devApi/livekit/";
 
 function handleTrackUnsubscribed(
   track: RemoteTrack,
-  // publication: RemoteTrackPublication,
-  // participant: RemoteParticipant,
 ) {
   // remove tracks from all attached elements
-  track.detach();
-}
-
-function handleLocalTrackUnpublished(
-  publication: LocalTrackPublication,
-  // participant: LocalParticipant,
-) {
-  // when local tracks are ended, update UI to remove them from rendering
-  publication?.track?.detach();
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function handleActiveSpeakerChange(_: Participant[]) {
-  // console.log(speakers);
-  // show UI indicators when participant is speaking
+  console.log("HATA DIYA", track);
+  // track.detach();
 }
 
 function handleDisconnect() {
@@ -55,33 +36,27 @@ const LiveKitConnect: React.FC = () => {
   const localVideoRef = useRef<HTMLVideoElement>(null);
 
   const [isJoined, setIsJoined] = useState<boolean>(false);
-  const [room, setRoom] = useState<Room | null>(null);
-  const [remoteParticipantsTracks, setRemoteParticipantsTracks] = useState<Map<string, Map<string, RemoteTrack>>>(new Map());
+  const [room] = useState<Room>(new Room({
+    adaptiveStream: true,
+    dynacast: true,
+    videoCaptureDefaults: {
+      resolution: VideoPresets.h360.resolution
+    }
+  }));
+
+  const [remoteParticipants, setRemoteParticipants] = useState<Array<RemoteParticipant>>([]);
   const [roomName, setRoomName] = useState<string>("test1");
   const [participantName, setParticipantName] = useState<string>("A");
-  const [isMuted, setIsMuted] = useState<boolean>(false);
+  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
+  const [isVideoMuted, setIsVideoMuted] = useState<boolean>(false);
 
+  useEffect(() => {
+    console.log("RemoteParticipantsDetails:", remoteParticipants);
+  }, [remoteParticipants]);
 
-  function handleTrackSubscribed(
-    track: RemoteTrack,
-    _: RemoteTrackPublication,
-    participant: RemoteParticipant,
-  ) {
-    // console.log("track subscribed", track, publication, participant);
-    if (track.kind === Track.Kind.Video || track.kind === Track.Kind.Audio) {
-      setRemoteParticipantsTracks(prev => {
-        if (!prev.has(participant.identity)) {
-          prev.set(participant.identity, new Map<string, RemoteTrack>());
-        }
-
-        if (track.sid)
-          prev.get(participant.identity)?.set(track.sid, track);
-
-        return new Map(prev);
-      });
-    }
-
-  }
+  const handleParticipantConnected = (participant: RemoteParticipant) => {
+    setRemoteParticipants(prev => [...prev, participant]);
+  };
 
   const setupRoom = useCallback(async () => {
     const tokenResponse: TokenResponse | undefined = await getToken(roomName, participantName);
@@ -91,58 +66,43 @@ const LiveKitConnect: React.FC = () => {
     }
 
     // Room configs, and event listeners
-    const room = new Room({
-      adaptiveStream: true,
-      dynacast: true,
-      videoCaptureDefaults: {
-        resolution: VideoPresets.h360.resolution
-      }
-    });
-
     room.prepareConnection(url, tokenResponse.token);
 
     room
-      .on(RoomEvent.TrackSubscribed, handleTrackSubscribed)
+      .on(RoomEvent.Connected, () => {
+        setIsJoined(true);
+        room.localParticipant.enableCameraAndMicrophone();
+
+        setRemoteParticipants(Array.from(room.remoteParticipants.values()));
+
+        room.remoteParticipants.forEach((participant) => {
+          participant.trackPublications.forEach((publication) => {
+            publication.setSubscribed(true);
+          });
+        });
+      })
+      .on(RoomEvent.LocalTrackPublished, (publication: LocalTrackPublication) => {
+        if (publication.track?.kind === Track.Kind.Video)
+          publication.track.attach(localVideoRef.current!);
+      })
+      .on(RoomEvent.ParticipantActive, (p) => console.log(p))
+      .on(RoomEvent.ParticipantConnected, handleParticipantConnected)
+      .on(RoomEvent.TrackPublished, (publication: RemoteTrackPublication) => {
+        publication.setSubscribed(true);
+      })
       .on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed)
-      .on(RoomEvent.ActiveSpeakersChanged, handleActiveSpeakerChange)
+      .on(RoomEvent.TrackUnpublished, (publication: RemoteTrackPublication) => {
+        console.log("HATA DIYA PUB", publication);
+      })
       .on(RoomEvent.Disconnected, handleDisconnect)
-      .on(RoomEvent.LocalTrackUnpublished, handleLocalTrackUnpublished);
 
     try {
-      await room.connect(url, tokenResponse.token);
-      console.log('connected to room', room);
-
-      flushSync(() => {
-        setIsJoined(true);
-      });
-
-      setRoom(room);
+      await room.connect(url, tokenResponse.token, { autoSubscribe: false });
     } catch (error) {
       console.log("Room connect error:", error);
     }
   }, [roomName, participantName]);
 
-  useEffect(() => {
-    if (isJoined && room) {
-      createLocalTracks({
-        audio: true,
-        video: true
-      }).then((tracks: LocalTrack[]) => {
-        const localVideoTrack: LocalTrack | undefined = tracks.find(track => track.kind === Track.Kind.Video);
-        if (localVideoRef.current && localVideoTrack)
-          localVideoTrack.attach(localVideoRef.current);
-
-        tracks.forEach(track => room.localParticipant.publishTrack(track));
-      })
-    }
-
-    return () => {
-      if (isJoined && room) {
-        room.disconnect();
-        setRoom(null);
-      }
-    }
-  }, [isJoined, room]);
 
   return !isJoined ? (
     <div className="h-full w-full flex items-center justify-center bg-gray-50">
@@ -203,45 +163,55 @@ const LiveKitConnect: React.FC = () => {
           </div>
         </div>
 
-        {Array.from(remoteParticipantsTracks.entries()).map(([identity, tracks]) => <Video
-          key={identity}
-          name={identity}
-          tracks={Array.from(tracks.values())}
+        {remoteParticipants.map((participant) => <ParticipantWindow
+          key={participant.identity}
+          participant={participant}
         />)}
       </div>
 
       <div className="flex gap-4 mt-4 px-6 pb-6">
         <button
           type='button'
-          className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600' : 'bg-gray-600'} text-white font-medium hover:${isMuted ? 'bg-red-700' : 'bg-gray-700'} cursor-pointer`}
+          className={`px-4 py-2 rounded ${isAudioMuted ? 'bg-red-600' : 'bg-gray-600'} text-white font-medium hover:${isAudioMuted ? 'bg-red-700' : 'bg-gray-700'} cursor-pointer`}
           onClick={() => {
-            if (room) {
-              const localAudioPubs = Array.from(room.localParticipant.audioTrackPublications.values());
-              localAudioPubs.forEach(pub => {
-                if (pub.audioTrack?.isMuted)
-                  pub.audioTrack?.mute();
-                else
-                  pub.audioTrack?.unmute();
-              })
-            }
-
-            setIsMuted((prev: boolean) => !prev);
+            room.localParticipant.setMicrophoneEnabled(isAudioMuted);
+            setIsAudioMuted((prev: boolean) => !prev);
           }}
         >
-          {isMuted ? (
-            // Muted mic icon (slash)
+          {isAudioMuted ? (
             <svg xmlns="http://www.w3.org/2000/svg" className="inline w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path d="M9 5a3 3 0 016 0v4a3 3 0 01-6 0V5z" stroke="currentColor" strokeWidth="2" />
               <path d="M19 11v1a7 7 0 01-7 7 7 7 0 01-7-7v-1m13.5 6.5L4.5 5.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
           ) : (
-            // Unmuted mic icon
             <svg xmlns="http://www.w3.org/2000/svg" className="inline w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path d="M12 19a7 7 0 007-7v-1M5 11v1a7 7 0 007 7" stroke="currentColor" strokeWidth="2" />
               <rect x="9" y="5" width="6" height="8" rx="3" stroke="currentColor" strokeWidth="2" />
             </svg>
           )}
         </button>
+
+        <button
+          type='button'
+          className={`px-4 py-2 rounded ${isVideoMuted ? 'bg-red-600' : 'bg-gray-600'} text-white font-medium hover:${isVideoMuted ? 'bg-red-700' : 'bg-gray-700'} cursor-pointer`}
+          onClick={() => {
+            room.localParticipant.setCameraEnabled(isVideoMuted);
+            setIsVideoMuted((prev: boolean) => !prev);
+          }}
+        >
+          {isVideoMuted ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="inline w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path d="M15 10.5V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-3.5l4 4v-11l-4 4z" stroke="currentColor" strokeWidth="2" fill="none" />
+              <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="inline w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <rect x="3" y="5" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
+              <polygon points="17 8 21 12 17 16 17 8" stroke="currentColor" strokeWidth="2" fill="none" />
+            </svg>
+          )}
+        </button>
+
         <button
           type='button'
           className="px-4 py-2 rounded bg-red-600 text-white font-medium hover:bg-red-700 cursor-pointer"
