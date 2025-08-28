@@ -8,10 +8,10 @@ export default defineConfig({
     react(),
     tailwindcss()
   ],
-  server: {
-    https: {
-      key: './cert.key',
-      cert: './cert.crt'
-    }
-  }
+  // server: {
+  //   https: {
+  //     key: './cert.key',
+  //     cert: './cert.crt'
+  //   }
+  // }
 })
