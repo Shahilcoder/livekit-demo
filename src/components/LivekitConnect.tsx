@@ -1,30 +1,16 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  LocalTrackPublication,
+  LocalTrack,
   RemoteParticipant,
-  RemoteTrack,
   RemoteTrackPublication,
   Room,
   RoomEvent,
-  Track,
   VideoPresets,
 } from 'livekit-client';
 import { getToken } from '../services/livekit.service';
 import ParticipantWindow from './ParticipantWindow';
 
 const url: string = "wss://dev.netclan.com/devApi/livekit/";
-
-function handleTrackUnsubscribed(
-  track: RemoteTrack,
-) {
-  // remove tracks from all attached elements
-  console.log("HATA DIYA", track);
-  // track.detach();
-}
-
-function handleDisconnect() {
-  console.log('disconnected from room');
-}
 
 interface TokenResponse {
   token: string,
@@ -33,9 +19,8 @@ interface TokenResponse {
 };
 
 const LiveKitConnect: React.FC = () => {
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-
   const [isJoined, setIsJoined] = useState<boolean>(false);
+
   const [room] = useState<Room>(new Room({
     adaptiveStream: true,
     dynacast: true,
@@ -45,7 +30,7 @@ const LiveKitConnect: React.FC = () => {
   }));
 
   const [remoteParticipants, setRemoteParticipants] = useState<Array<RemoteParticipant>>([]);
-  const [roomName, setRoomName] = useState<string>("test1");
+  const [roomName, setRoomName] = useState<string>("test2");
   const [participantName, setParticipantName] = useState<string>("A");
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
   const [isVideoMuted, setIsVideoMuted] = useState<boolean>(false);
@@ -58,7 +43,11 @@ const LiveKitConnect: React.FC = () => {
     setRemoteParticipants(prev => [...prev, participant]);
   };
 
-  const setupRoom = useCallback(async () => {
+  function handleDisconnect() {
+    setIsJoined(false);
+  }
+
+  const setupRoom = async () => {
     const tokenResponse: TokenResponse | undefined = await getToken(roomName, participantName);
 
     if (!tokenResponse) {
@@ -81,18 +70,14 @@ const LiveKitConnect: React.FC = () => {
           });
         });
       })
-      .on(RoomEvent.LocalTrackPublished, (publication: LocalTrackPublication) => {
-        if (publication.track?.kind === Track.Kind.Video)
-          publication.track.attach(localVideoRef.current!);
-      })
       .on(RoomEvent.ParticipantActive, (p) => console.log(p))
       .on(RoomEvent.ParticipantConnected, handleParticipantConnected)
+      .on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
+        console.log("disconnecting guy", participant.identity);
+        setRemoteParticipants(prev => prev.filter(p => p.identity !== participant.identity));
+      })
       .on(RoomEvent.TrackPublished, (publication: RemoteTrackPublication) => {
         publication.setSubscribed(true);
-      })
-      .on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed)
-      .on(RoomEvent.TrackUnpublished, (publication: RemoteTrackPublication) => {
-        console.log("HATA DIYA PUB", publication);
       })
       .on(RoomEvent.Disconnected, handleDisconnect)
 
@@ -101,7 +86,7 @@ const LiveKitConnect: React.FC = () => {
     } catch (error) {
       console.log("Room connect error:", error);
     }
-  }, [roomName, participantName]);
+  };
 
 
   return !isJoined ? (
@@ -151,17 +136,11 @@ const LiveKitConnect: React.FC = () => {
         className="w-full h-full grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 p-6 bg-black"
         style={{ borderRadius: "0.75rem" }}
       >
-        <div className="relative w-full h-full">
-          <video
-            ref={localVideoRef}
-            className="w-full h-full scale-x-[-1] object-contain bg-gray-900 rounded-lg"
-            autoPlay
-            muted
-          />
-          <div className="absolute bottom-2 left-2 text-white bg-black bg-opacity-60 px-2 py-1 rounded text-xs">
-            {participantName}
-          </div>
-        </div>
+        <ParticipantWindow
+          participant={room.localParticipant}
+          isLocalAudioMuted={isAudioMuted}
+          isLocalVideoMuted={isVideoMuted}
+        />
 
         {remoteParticipants.map((participant) => <ParticipantWindow
           key={participant.identity}
@@ -215,7 +194,15 @@ const LiveKitConnect: React.FC = () => {
         <button
           type='button'
           className="px-4 py-2 rounded bg-red-600 text-white font-medium hover:bg-red-700 cursor-pointer"
-          onClick={() => window.location.reload()}
+          onClick={async () => {
+            await room.localParticipant.unpublishTracks(
+              room.localParticipant.getTrackPublications().map(
+                pub => pub.track as LocalTrack
+              )
+            );
+
+            room.disconnect(true);
+          }}
         >
           Leave Room
         </button>

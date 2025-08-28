@@ -3,9 +3,7 @@ import LiveKitConnect from './components/LivekitConnect'
 
 function App() {
   return (
-    <>
-      <LiveKitConnect />
-    </>
+    <LiveKitConnect />
   )
 }
 
