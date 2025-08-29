@@ -4,10 +4,6 @@ const token_url: string = "https://dev.netclan.com/devChat/api/conferencing/toke
 
 export const getToken = async (roomName: string, participantName: string) => {
   try {
-    if (!roomName || !participantName) {
-      throw Error("Room Name and Participant Name are required");
-    }
-
     const response: AxiosResponse = await axios.post(token_url, {
       roomName,
       participantName

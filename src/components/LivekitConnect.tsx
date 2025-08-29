@@ -20,6 +20,7 @@ interface TokenResponse {
 
 const LiveKitConnect: React.FC = () => {
   const [isJoined, setIsJoined] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   const [room] = useState<Room>(new Room({
     adaptiveStream: true,
@@ -30,8 +31,8 @@ const LiveKitConnect: React.FC = () => {
   }));
 
   const [remoteParticipants, setRemoteParticipants] = useState<Array<RemoteParticipant>>([]);
-  const [roomName, setRoomName] = useState<string>("test2");
-  const [participantName, setParticipantName] = useState<string>("A");
+  const [roomName, setRoomName] = useState<string>("netclan_test");
+  const [participantName, setParticipantName] = useState<string>("");
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
   const [isVideoMuted, setIsVideoMuted] = useState<boolean>(false);
 
@@ -48,6 +49,12 @@ const LiveKitConnect: React.FC = () => {
   }
 
   const setupRoom = async () => {
+    if (!roomName || !participantName) {
+      throw Error("Room Name and Participant Name are required");
+    }
+
+    setIsLoading(true);
+
     const tokenResponse: TokenResponse | undefined = await getToken(roomName, participantName);
 
     if (!tokenResponse) {
@@ -59,6 +66,7 @@ const LiveKitConnect: React.FC = () => {
 
     room
       .on(RoomEvent.Connected, () => {
+        setIsLoading(false);
         setIsJoined(true);
         room.localParticipant.enableCameraAndMicrophone();
 
@@ -117,11 +125,15 @@ const LiveKitConnect: React.FC = () => {
             />
           </div>
           <button
-            onClick={setupRoom}
+            onClick={isLoading ? undefined : setupRoom}
             type="button"
-            className="w-full inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-white font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+            className={`w-full inline-flex items-center justify-center rounded-md px-4 py-2 text-white font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+              isLoading
+                ? 'bg-blue-300 cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700 cursor-pointer'
+            }`}
           >
-            Join room
+            {isLoading ? 'Joining...' : 'Join Room'}
           </button>
         </div>
       </div>
@@ -133,8 +145,7 @@ const LiveKitConnect: React.FC = () => {
       </h2>
 
       <div
-        className="w-full h-full grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 p-6 bg-black"
-        style={{ borderRadius: "0.75rem" }}
+        className="w-full h-full max-h-[80vh] rounded-lg flex flex-wrap justify-center gap-2 p-2 bg-black overflow-auto"
       >
         <ParticipantWindow
           participant={room.localParticipant}
@@ -142,10 +153,12 @@ const LiveKitConnect: React.FC = () => {
           isLocalVideoMuted={isVideoMuted}
         />
 
-        {remoteParticipants.map((participant) => <ParticipantWindow
-          key={participant.identity}
-          participant={participant}
-        />)}
+        {remoteParticipants.map((participant) => (
+          <ParticipantWindow
+            key={participant.identity}
+            participant={participant}
+          />
+        ))}
       </div>
 
       <div className="flex gap-4 mt-4 px-6 pb-6">

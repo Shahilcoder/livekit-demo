@@ -49,7 +49,7 @@ const ParticipantWindow: React.FC<ParticipantWindowProps> = ({ participant, isLo
   }, [participant, localVideoRef, localAudioRef])
 
   return (
-    <div className={`box-border relative aspect-video border-4 ${(participant.isLocal ? !isLocalAudioMuted : !isAudioMuted) && isSpeaking ? 'border-blue-500' : 'border-transparent'} rounded-lg overflow-hidden`}>
+    <div className={`relative box-border aspect-video border-4 ${(participant.isLocal ? !isLocalAudioMuted : !isAudioMuted) && isSpeaking ? 'border-blue-500' : 'border-transparent'} rounded-lg overflow-hidden w-[32%] sm:w-full md:w-[49%]`}>
       {(participant.isLocal ? isLocalVideoMuted : isVideoMuted) && (
         <div className="absolute z-10 inset-0 w-full h-full flex items-center justify-center bg-gray-900 rounded-lg text-6xl">
           <span role="img" aria-label="person">👤</span>
