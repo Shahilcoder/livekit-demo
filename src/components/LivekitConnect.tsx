@@ -1,49 +1,16 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  createLocalTracks,
   LocalTrack,
-  LocalTrackPublication,
-  Participant,
   RemoteParticipant,
-  RemoteTrack,
   RemoteTrackPublication,
   Room,
   RoomEvent,
-  Track,
   VideoPresets,
 } from 'livekit-client';
 import { getToken } from '../services/livekit.service';
-import { flushSync } from 'react-dom';
-import Video from './Video';
+import ParticipantWindow from './ParticipantWindow';
 
 const url: string = "wss://dev.netclan.com/devApi/livekit/";
-
-function handleTrackUnsubscribed(
-  track: RemoteTrack,
-  // publication: RemoteTrackPublication,
-  // participant: RemoteParticipant,
-) {
-  // remove tracks from all attached elements
-  track.detach();
-}
-
-function handleLocalTrackUnpublished(
-  publication: LocalTrackPublication,
-  // participant: LocalParticipant,
-) {
-  // when local tracks are ended, update UI to remove them from rendering
-  publication?.track?.detach();
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function handleActiveSpeakerChange(_: Participant[]) {
-  // console.log(speakers);
-  // show UI indicators when participant is speaking
-}
-
-function handleDisconnect() {
-  console.log('disconnected from room');
-}
 
 interface TokenResponse {
   token: string,
@@ -52,37 +19,42 @@ interface TokenResponse {
 };
 
 const LiveKitConnect: React.FC = () => {
-  const localVideoRef = useRef<HTMLVideoElement>(null);
-
   const [isJoined, setIsJoined] = useState<boolean>(false);
-  const [room, setRoom] = useState<Room | null>(null);
-  const [remoteParticipantsTracks, setRemoteParticipantsTracks] = useState<Map<string, Map<string, RemoteTrack>>>(new Map());
-  const [roomName, setRoomName] = useState<string>("");
-  const [participantName, setParticipantName] = useState<string>("");
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
-
-  function handleTrackSubscribed(
-    track: RemoteTrack,
-    _: RemoteTrackPublication,
-    participant: RemoteParticipant,
-  ) {
-    // console.log("track subscribed", track, publication, participant);
-    if (track.kind === Track.Kind.Video || track.kind === Track.Kind.Audio) {
-      setRemoteParticipantsTracks(prev => {
-        if (!prev.has(participant.identity)) {
-          prev.set(participant.identity, new Map<string, RemoteTrack>());
-        }
-
-        if (track.sid)
-          prev.get(participant.identity)?.set(track.sid, track);
-
-        return new Map(prev);
-      });
+  const [room] = useState<Room>(new Room({
+    adaptiveStream: true,
+    dynacast: true,
+    videoCaptureDefaults: {
+      resolution: VideoPresets.h360.resolution
     }
+  }));
 
+  const [remoteParticipants, setRemoteParticipants] = useState<Array<RemoteParticipant>>([]);
+  const [roomName, setRoomName] = useState<string>("netclan_test");
+  const [participantName, setParticipantName] = useState<string>("");
+  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(false);
+  const [isVideoMuted, setIsVideoMuted] = useState<boolean>(false);
+
+  useEffect(() => {
+    console.log("RemoteParticipantsDetails:", remoteParticipants);
+  }, [remoteParticipants]);
+
+  const handleParticipantConnected = (participant: RemoteParticipant) => {
+    setRemoteParticipants(prev => [...prev, participant]);
+  };
+
+  function handleDisconnect() {
+    setIsJoined(false);
   }
 
-  const setupRoom = useCallback(async () => {
+  const setupRoom = async () => {
+    if (!roomName || !participantName) {
+      throw Error("Room Name and Participant Name are required");
+    }
+
+    setIsLoading(true);
+
     const tokenResponse: TokenResponse | undefined = await getToken(roomName, participantName);
 
     if (!tokenResponse) {
@@ -90,58 +62,40 @@ const LiveKitConnect: React.FC = () => {
     }
 
     // Room configs, and event listeners
-    const room = new Room({
-      adaptiveStream: true,
-      dynacast: true,
-      videoCaptureDefaults: {
-        resolution: VideoPresets.h360.resolution
-      }
-    });
-
     room.prepareConnection(url, tokenResponse.token);
 
     room
-      .on(RoomEvent.TrackSubscribed, handleTrackSubscribed)
-      .on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed)
-      .on(RoomEvent.ActiveSpeakersChanged, handleActiveSpeakerChange)
+      .on(RoomEvent.Connected, () => {
+        setIsLoading(false);
+        setIsJoined(true);
+        room.localParticipant.enableCameraAndMicrophone();
+
+        setRemoteParticipants(Array.from(room.remoteParticipants.values()));
+
+        room.remoteParticipants.forEach((participant) => {
+          participant.trackPublications.forEach((publication) => {
+            publication.setSubscribed(true);
+          });
+        });
+      })
+      .on(RoomEvent.ParticipantActive, (p) => console.log(p))
+      .on(RoomEvent.ParticipantConnected, handleParticipantConnected)
+      .on(RoomEvent.ParticipantDisconnected, (participant: RemoteParticipant) => {
+        console.log("disconnecting guy", participant.identity);
+        setRemoteParticipants(prev => prev.filter(p => p.identity !== participant.identity));
+      })
+      .on(RoomEvent.TrackPublished, (publication: RemoteTrackPublication) => {
+        publication.setSubscribed(true);
+      })
       .on(RoomEvent.Disconnected, handleDisconnect)
-      .on(RoomEvent.LocalTrackUnpublished, handleLocalTrackUnpublished);
 
     try {
-      await room.connect(url, tokenResponse.token);
-      console.log('connected to room', room);
-
-      flushSync(() => {
-        setIsJoined(true);
-      });
-
-      setRoom(room);
+      await room.connect(url, tokenResponse.token, { autoSubscribe: false });
     } catch (error) {
       console.log("Room connect error:", error);
     }
-  }, [roomName, participantName]);
+  };
 
-  useEffect(() => {
-    if (isJoined && room) {
-      createLocalTracks({
-        audio: true,
-        video: true
-      }).then((tracks: LocalTrack[]) => {
-        const localVideoTrack: LocalTrack | undefined = tracks.find(track => track.kind === Track.Kind.Video);
-        if (localVideoRef.current && localVideoTrack)
-          localVideoTrack.attach(localVideoRef.current);
-
-        tracks.forEach(track => room.localParticipant.publishTrack(track));
-      })
-    }
-
-    return () => {
-      if (isJoined && room) {
-        room.disconnect();
-        setRoom(null);
-      }
-    }
-  }, [isJoined, room]);
 
   return !isJoined ? (
     <div className="h-full w-full flex items-center justify-center bg-gray-50">
@@ -171,11 +125,15 @@ const LiveKitConnect: React.FC = () => {
             />
           </div>
           <button
-            onClick={setupRoom}
+            onClick={isLoading ? undefined : setupRoom}
             type="button"
-            className="w-full inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-white font-medium hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className={`w-full inline-flex items-center justify-center rounded-md px-4 py-2 text-white font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+              isLoading
+                ? 'bg-blue-300 cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700 cursor-pointer'
+            }`}
           >
-            Join room
+            {isLoading ? 'Joining...' : 'Join Room'}
           </button>
         </div>
       </div>
@@ -187,33 +145,77 @@ const LiveKitConnect: React.FC = () => {
       </h2>
 
       <div
-        className="w-full h-full grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 p-6 bg-black"
-        style={{ borderRadius: "0.75rem" }}
+        className="w-full h-full max-h-[80vh] rounded-lg flex flex-wrap justify-center gap-2 p-2 bg-black overflow-auto"
       >
-        <div className="relative w-full h-full">
-          <video
-            ref={localVideoRef}
-            className="w-full h-full scale-x-[-1] object-contain bg-gray-900 rounded-lg"
-            autoPlay
-            muted
-          />
-          <div className="absolute bottom-2 left-2 text-white bg-black bg-opacity-60 px-2 py-1 rounded text-xs">
-            {participantName}
-          </div>
-        </div>
+        <ParticipantWindow
+          participant={room.localParticipant}
+          isLocalAudioMuted={isAudioMuted}
+          isLocalVideoMuted={isVideoMuted}
+        />
 
-        {Array.from(remoteParticipantsTracks.entries()).map(([identity, tracks]) => <Video
-          key={identity}
-          name={identity}
-          tracks={Array.from(tracks.values())}
-        />)}
+        {remoteParticipants.map((participant) => (
+          <ParticipantWindow
+            key={participant.identity}
+            participant={participant}
+          />
+        ))}
       </div>
 
       <div className="flex gap-4 mt-4 px-6 pb-6">
         <button
           type='button'
+          className={`px-4 py-2 rounded ${isAudioMuted ? 'bg-red-600' : 'bg-gray-600'} text-white font-medium hover:${isAudioMuted ? 'bg-red-700' : 'bg-gray-700'} cursor-pointer`}
+          onClick={() => {
+            room.localParticipant.setMicrophoneEnabled(isAudioMuted);
+            setIsAudioMuted((prev: boolean) => !prev);
+          }}
+        >
+          {isAudioMuted ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="inline w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path d="M9 5a3 3 0 016 0v4a3 3 0 01-6 0V5z" stroke="currentColor" strokeWidth="2" />
+              <path d="M19 11v1a7 7 0 01-7 7 7 7 0 01-7-7v-1m13.5 6.5L4.5 5.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="inline w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path d="M12 19a7 7 0 007-7v-1M5 11v1a7 7 0 007 7" stroke="currentColor" strokeWidth="2" />
+              <rect x="9" y="5" width="6" height="8" rx="3" stroke="currentColor" strokeWidth="2" />
+            </svg>
+          )}
+        </button>
+
+        <button
+          type='button'
+          className={`px-4 py-2 rounded ${isVideoMuted ? 'bg-red-600' : 'bg-gray-600'} text-white font-medium hover:${isVideoMuted ? 'bg-red-700' : 'bg-gray-700'} cursor-pointer`}
+          onClick={() => {
+            room.localParticipant.setCameraEnabled(isVideoMuted);
+            setIsVideoMuted((prev: boolean) => !prev);
+          }}
+        >
+          {isVideoMuted ? (
+            <svg xmlns="http://www.w3.org/2000/svg" className="inline w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path d="M15 10.5V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-3.5l4 4v-11l-4 4z" stroke="currentColor" strokeWidth="2" fill="none" />
+              <line x1="3" y1="3" x2="21" y2="21" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" className="inline w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <rect x="3" y="5" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="2" fill="none" />
+              <polygon points="17 8 21 12 17 16 17 8" stroke="currentColor" strokeWidth="2" fill="none" />
+            </svg>
+          )}
+        </button>
+
+        <button
+          type='button'
           className="px-4 py-2 rounded bg-red-600 text-white font-medium hover:bg-red-700 cursor-pointer"
-          onClick={() => window.location.reload()}
+          onClick={async () => {
+            await room.localParticipant.unpublishTracks(
+              room.localParticipant.getTrackPublications().map(
+                pub => pub.track as LocalTrack
+              )
+            );
+
+            room.disconnect(true);
+          }}
         >
           Leave Room
         </button>
